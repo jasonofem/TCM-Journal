@@ -398,7 +398,7 @@ export default function SettingsSyncView({
             >
               <div className="flex items-center gap-2 border-b border-[#1e222f] pb-3">
                 <KeyRound className="w-4 h-4 text-[#c8a55b]" />
-                <h3 className="text-sm font-semibold text-white">Change Desk PIN</h3>
+                <h3 className="text-sm font-semibold text-white">Change 6-Digit Access Key (PIN)</h3>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <input
@@ -406,7 +406,7 @@ export default function SettingsSyncView({
                   required
                   value={currentPin}
                   onChange={(e) => setCurrentPin(e.target.value)}
-                  placeholder="Current PIN"
+                  placeholder="Current Key / PIN"
                   className="bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num text-white"
                 />
                 <input
@@ -415,7 +415,7 @@ export default function SettingsSyncView({
                   minLength={6}
                   value={newPin}
                   onChange={(e) => setNewPin(e.target.value)}
-                  placeholder="New PIN (6+ chars)"
+                  placeholder="New 6-Digit Key (6+ chars)"
                   className="bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num text-white"
                 />
               </div>
@@ -424,7 +424,7 @@ export default function SettingsSyncView({
                 disabled={busy}
                 className="px-4 py-2 rounded-xl bg-[#1c212e] border border-[#c8a55b]/40 text-xs text-[#e8c87a] hover:bg-[#c8a55b]/15"
               >
-                Update PIN
+                Update Key
               </button>
             </form>
           )}

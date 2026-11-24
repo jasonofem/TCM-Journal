@@ -219,7 +219,7 @@ export default function LoginBoard({
 
               <div>
                 <label className="block text-[11px] uppercase tracking-[0.14em] text-[#9398a6] mb-1.5">
-                  Desk PIN
+                  6-Digit Access Key (PIN)
                 </label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-[#c8a55b]/70 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -228,7 +228,7 @@ export default function LoginBoard({
                     required
                     value={pin}
                     onChange={(e) => setPin(e.target.value)}
-                    placeholder="Enter your PIN"
+                    placeholder="Enter 6-digit access key"
                     className="w-full bg-[#090b10] border border-[#272c3a] focus:border-[#c8a55b] rounded-xl pl-10 pr-11 py-3 text-sm font-mono-num text-white placeholder:text-[#555c6e] focus:outline-none transition-colors"
                   />
                   <button
@@ -301,9 +301,22 @@ export default function LoginBoard({
               </div>
 
               <div>
-                <label className="block text-[11px] uppercase tracking-[0.12em] text-[#9398a6] mb-1">
-                  Master PIN (6+ characters)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] uppercase tracking-[0.12em] text-[#9398a6]">
+                    6-Digit Boss Key (PIN)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const code = String(Math.floor(100000 + Math.random() * 900000));
+                      setAdminPin(code);
+                      setShowPin(true);
+                    }}
+                    className="text-[11px] text-[#c8a55b] hover:underline"
+                  >
+                    Generate 6-Digit Key
+                  </button>
+                </div>
                 <div className="relative">
                   <input
                     type={showPin ? 'text' : 'password'}
@@ -311,7 +324,7 @@ export default function LoginBoard({
                     minLength={6}
                     value={adminPin}
                     onChange={(e) => setAdminPin(e.target.value)}
-                    placeholder="Choose a secure 6+ char PIN"
+                    placeholder="e.g. 482915 (6+ chars)"
                     className="w-full bg-[#090b10] border border-[#272c3a] focus:border-[#c8a55b] rounded-xl px-3.5 pr-10 py-2.5 text-sm font-mono-num text-white placeholder:text-[#555c6e] focus:outline-none"
                   />
                   <button

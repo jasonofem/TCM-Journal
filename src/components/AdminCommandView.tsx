@@ -3,7 +3,10 @@
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Check,
+  Copy,
   Crown,
+  Dices,
   Eye,
   FileUp,
   KeyRound,
@@ -43,8 +46,10 @@ export default function AdminCommandView({
   onSelectFirmTrade,
 }: AdminCommandViewProps) {
   const [showIssueModal, setShowIssueModal] = useState(false);
+  const [issueMode, setIssueMode] = useState<'single' | 'bulk'>('single');
   const [resetTarget, setResetTarget] = useState<FirmTraderSummary | null>(null);
   const [newPin, setNewPin] = useState('');
+  const [resetResult, setResetResult] = useState<{ traderId: string; key: string } | null>(null);
 
   // Issue desk state
   const [newId, setNewId] = useState('TCM-T-001');
@@ -55,8 +60,19 @@ export default function AdminCommandView({
   const [newCapital, setNewCapital] = useState('5000');
   const [newDll, setNewDll] = useState('5');
   const [newDeskPin, setNewDeskPin] = useState('');
+  const [bulkLines, setBulkLines] = useState(
+    'TCM-T-001, Trader One, 5000\nTCM-T-002, Trader Two, 5000\nTCM-T-003, Jason Ofem, 5000'
+  );
+  const [issuedCredentials, setIssuedCredentials] = useState<
+    Array<{ traderId: string; name: string; key: string; initialCapital: number }>
+  >([]);
+  const [copiedCreds, setCopiedCreds] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function randomSixDigit(): string {
+    return String(Math.floor(100000 + Math.random() * 900000));
+  }
 
   // Firm trade tape filter
   const [tapeFilter, setTapeFilter] = useState<'all' | 'qc' | 'open'>('all');
@@ -84,6 +100,48 @@ export default function AdminCommandView({
     setModalError(null);
     setSubmitting(true);
     try {
+      if (issueMode === 'bulk') {
+        const lines = bulkLines
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const bulkPayload = lines.map((line) => {
+          const parts = line.split(/[,\t|]+/).map((p) => p.trim());
+          return {
+            traderId: parts[0] || '',
+            name: parts[1] || parts[0] || '',
+            initialCapital: parts[2] ? Number(parts[2]) || 5000 : Number(newCapital) || 5000,
+            accountNumber: parts[3] || null,
+            tier: newTier,
+            dailyLossLimitPct: Number(newDll) || 5,
+            pin: parts[4] && parts[4].length >= 6 ? parts[4] : randomSixDigit(),
+          };
+        });
+        const res = await fetch('/api/admin/traders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bulk: bulkPayload }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setModalError(data.error || 'Bulk issue failed.');
+          return;
+        }
+        if (Array.isArray(data.created) && data.created.length > 0) {
+          setIssuedCredentials((prev) => [...data.created, ...prev]);
+        }
+        if (Array.isArray(data.errors) && data.errors.length > 0) {
+          setModalError(
+            data.errors.map((er: { traderId: string; error: string }) => `${er.traderId}: ${er.error}`).join(' | ')
+          );
+        } else {
+          setShowIssueModal(false);
+        }
+        await onRefresh();
+        return;
+      }
+
+      const chosenKey = newDeskPin.trim() || randomSixDigit();
       const res = await fetch('/api/admin/traders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -95,7 +153,7 @@ export default function AdminCommandView({
           accountNumber: newAccNum.trim() || null,
           initialCapital: Number(newCapital) || 5000,
           dailyLossLimitPct: Number(newDll) || 5,
-          pin: newDeskPin,
+          pin: chosenKey,
         }),
       });
       const data = await res.json();
@@ -103,6 +161,15 @@ export default function AdminCommandView({
         setModalError(data.error || 'Failed to issue desk.');
         return;
       }
+      setIssuedCredentials((prev) => [
+        {
+          traderId: data.user.traderId,
+          name: data.user.name,
+          key: data.key || chosenKey,
+          initialCapital: data.user.initialCapital,
+        },
+        ...prev,
+      ]);
       setShowIssueModal(false);
       setNewName('');
       setNewAccNum('');
@@ -118,12 +185,23 @@ export default function AdminCommandView({
     if (!resetTarget) return;
     setSubmitting(true);
     try {
+      const finalKey = newPin.trim() || randomSixDigit();
       const res = await fetch(`/api/admin/traders/${resetTarget.user.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newPin }),
+        body: JSON.stringify({ newPin: finalKey }),
       });
       if (res.ok) {
+        setResetResult({ traderId: resetTarget.user.traderId, key: finalKey });
+        setIssuedCredentials((prev) => [
+          {
+            traderId: resetTarget.user.traderId,
+            name: resetTarget.user.name,
+            key: finalKey,
+            initialCapital: resetTarget.user.initialCapital,
+          },
+          ...prev.filter((c) => c.traderId !== resetTarget.user.traderId),
+        ]);
         setResetTarget(null);
         setNewPin('');
         await onRefresh();
@@ -188,6 +266,8 @@ export default function AdminCommandView({
             onClick={() => {
               const nextNum = overview.traders.length + 1;
               setNewId(`TCM-T-${String(nextNum).padStart(3, '0')}`);
+              setNewDeskPin(randomSixDigit());
+              setModalError(null);
               setShowIssueModal(true);
             }}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#c8a55b] hover:bg-[#d8b76e] text-[#090a0f] font-semibold text-xs shadow-[0_6px_20px_rgba(200,165,91,0.22)]"
@@ -197,6 +277,75 @@ export default function AdminCommandView({
           </button>
         </div>
       </div>
+
+      {/* Newly Issued / Reset 6-Digit Keys Roster */}
+      {(issuedCredentials.length > 0 || resetResult) && (
+        <div className="bg-[#121620] border border-[#c8a55b]/45 rounded-2xl p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-semibold text-[#e6c77a] flex items-center gap-1.5">
+                <KeyRound className="w-4 h-4" />
+                Ready-to-Share 6-Digit Trader Keys (Copy & Send to Each Trader)
+              </div>
+              <p className="text-[11px] text-[#9398a6] mt-0.5">
+                Keys are encrypted in Postgres once created — copy and share them with your traders now.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const text = issuedCredentials
+                    .map(
+                      (c) =>
+                        `${c.name} (${c.traderId}) — 6-Digit Key: ${c.key} | URL: ${window.location.origin}`
+                    )
+                    .join('\n');
+                  navigator.clipboard.writeText(text);
+                  setCopiedCreds(true);
+                  setTimeout(() => setCopiedCreds(false), 2000);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#c8a55b] text-[#090a0f] font-semibold text-xs"
+              >
+                {copiedCreds ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedCreds ? 'Copied All!' : 'Copy All Keys'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIssuedCredentials([]);
+                  setResetResult(null);
+                }}
+                className="text-xs text-[#7f8698] hover:text-white px-2"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {issuedCredentials.map((cred) => (
+              <div
+                key={cred.traderId}
+                className="bg-[#090b10] border border-[#272c3a] rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs"
+              >
+                <div className="min-w-0">
+                  <div className="font-mono-num font-semibold text-[#e6c77a]">
+                    {cred.traderId}
+                  </div>
+                  <div className="text-[#cbd0dc] truncate">{cred.name}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-[10px] uppercase text-[#7f8698]">6-Digit Key</div>
+                  <div className="font-mono-num text-sm font-bold tracking-widest text-emerald-300">
+                    {cred.key}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Firm KPI Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -568,9 +717,9 @@ export default function AdminCommandView({
       {/* Issue Trader Modal */}
       {showIssueModal && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-[#101218] border border-[#c8a55b]/40 rounded-2xl p-6 space-y-4">
+          <div className="w-full max-w-lg bg-[#101218] border border-[#c8a55b]/40 rounded-2xl p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-serif-display text-xl text-white">Issue New Trader Desk</h3>
+              <h3 className="font-serif-display text-xl text-white">Issue Trader Desk(s)</h3>
               <button
                 onClick={() => setShowIssueModal(false)}
                 className="text-[#8d94a5] hover:text-white"
@@ -578,123 +727,227 @@ export default function AdminCommandView({
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-[#090b10] border border-[#222634]">
+              <button
+                type="button"
+                onClick={() => {
+                  setIssueMode('single');
+                  setModalError(null);
+                }}
+                className={`py-1.5 rounded-lg text-xs font-medium ${
+                  issueMode === 'single'
+                    ? 'bg-[#c8a55b] text-[#090a0f] font-semibold'
+                    : 'text-[#8d94a5] hover:text-white'
+                }`}
+              >
+                Single Trader Desk
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIssueMode('bulk');
+                  setModalError(null);
+                }}
+                className={`py-1.5 rounded-lg text-xs font-medium ${
+                  issueMode === 'bulk'
+                    ? 'bg-[#c8a55b] text-[#090a0f] font-semibold'
+                    : 'text-[#8d94a5] hover:text-white'
+                }`}
+              >
+                Bulk Issue Multiple Traders
+              </button>
+            </div>
+
             {modalError && (
               <div className="rounded-lg bg-rose-500/10 border border-rose-500/40 px-3 py-2 text-xs text-rose-200">
                 {modalError}
               </div>
             )}
+
             <form onSubmit={handleIssueDesk} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
-                    Trader ID
-                  </label>
-                  <input
-                    required
-                    value={newId}
-                    onChange={(e) => setNewId(e.target.value.toUpperCase())}
-                    className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num uppercase text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
-                    Role
-                  </label>
-                  <select
-                    value={newRole}
-                    onChange={(e) => setNewRole(e.target.value as 'trader' | 'admin')}
-                    className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs text-white"
-                  >
-                    <option value="trader">Trader Desk</option>
-                    <option value="admin">Co-Admin / Risk Officer</option>
-                  </select>
-                </div>
-              </div>
+              {issueMode === 'bulk' ? (
+                <>
+                  <div>
+                    <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                      Paste Trader List (one per line: ID, Full Name, Capital, Account#)
+                    </label>
+                    <textarea
+                      rows={5}
+                      required
+                      value={bulkLines}
+                      onChange={(e) => setBulkLines(e.target.value)}
+                      placeholder={'TCM-T-001, John Doe, 5000\nTCM-T-002, Jane Smith, 10000\nTCM-T-003, Jason Ofem, 5000, 315077956'}
+                      className="w-full bg-[#090b10] border border-[#272c3a] rounded-xl p-3 text-xs font-mono-num text-white focus:border-[#c8a55b] focus:outline-none"
+                    />
+                    <p className="text-[11px] text-[#7f8698] mt-1">
+                      A unique 6-digit access key is automatically generated for every trader in the list.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                        Default Tier
+                      </label>
+                      <select
+                        value={newTier}
+                        onChange={(e) => setNewTier(e.target.value)}
+                        className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-2.5 py-2 text-xs text-white"
+                      >
+                        <option value="Trainee">Trainee</option>
+                        <option value="Junior Funded">Junior Funded</option>
+                        <option value="Senior Funded">Senior Funded</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                        Default Capital
+                      </label>
+                      <input
+                        type="number"
+                        value={newCapital}
+                        onChange={(e) => setNewCapital(e.target.value)}
+                        className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-2.5 py-2 text-xs font-mono-num text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                        DLL %
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={newDll}
+                        onChange={(e) => setNewDll(e.target.value)}
+                        className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-2.5 py-2 text-xs font-mono-num text-white"
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                        Trader ID
+                      </label>
+                      <input
+                        required
+                        value={newId}
+                        onChange={(e) => setNewId(e.target.value.toUpperCase())}
+                        className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num uppercase text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                        Role
+                      </label>
+                      <select
+                        value={newRole}
+                        onChange={(e) => setNewRole(e.target.value as 'trader' | 'admin')}
+                        className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs text-white"
+                      >
+                        <option value="trader">Trader Desk</option>
+                        <option value="admin">Co-Admin / Risk Officer</option>
+                      </select>
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
-                  Trader Full Name
-                </label>
-                <input
-                  required
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="e.g. Jason Ofem"
-                  className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs text-white"
-                />
-              </div>
+                  <div>
+                    <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                      Trader Full Name
+                    </label>
+                    <input
+                      required
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="e.g. Jason Ofem"
+                      className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs text-white"
+                    />
+                  </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
-                    Tier
-                  </label>
-                  <select
-                    value={newTier}
-                    onChange={(e) => setNewTier(e.target.value)}
-                    className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs text-white"
-                  >
-                    <option value="Trainee">Trainee</option>
-                    <option value="Junior Funded">Junior Funded</option>
-                    <option value="Senior Funded">Senior Funded</option>
-                    <option value="Risk Officer">Risk Officer</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
-                    Broker Acct #
-                  </label>
-                  <input
-                    value={newAccNum}
-                    onChange={(e) => setNewAccNum(e.target.value)}
-                    placeholder="e.g. 315077956"
-                    className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num text-white"
-                  />
-                </div>
-              </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                        Tier
+                      </label>
+                      <select
+                        value={newTier}
+                        onChange={(e) => setNewTier(e.target.value)}
+                        className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs text-white"
+                      >
+                        <option value="Trainee">Trainee</option>
+                        <option value="Junior Funded">Junior Funded</option>
+                        <option value="Senior Funded">Senior Funded</option>
+                        <option value="Risk Officer">Risk Officer</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                        Broker Acct #
+                      </label>
+                      <input
+                        value={newAccNum}
+                        onChange={(e) => setNewAccNum(e.target.value)}
+                        placeholder="e.g. 315077956"
+                        className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num text-white"
+                      />
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
-                    Capital ($)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={newCapital}
-                    onChange={(e) => setNewCapital(e.target.value)}
-                    className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
-                    Daily Loss Limit %
-                  </label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    required
-                    value={newDll}
-                    onChange={(e) => setNewDll(e.target.value)}
-                    className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num text-white"
-                  />
-                </div>
-              </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                        Capital ($)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        value={newCapital}
+                        onChange={(e) => setNewCapital(e.target.value)}
+                        className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
+                        Daily Loss Limit %
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        required
+                        value={newDll}
+                        onChange={(e) => setNewDll(e.target.value)}
+                        className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num text-white"
+                      />
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-[10px] uppercase text-[#8d94a5] mb-1">
-                  Initial PIN (4+ characters)
-                </label>
-                <input
-                  type="text"
-                  required
-                  minLength={4}
-                  value={newDeskPin}
-                  onChange={(e) => setNewDeskPin(e.target.value)}
-                  placeholder="Share with trader to sign in"
-                  className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-xs font-mono-num text-white"
-                />
-              </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[10px] uppercase text-[#8d94a5]">
+                        6-Digit Access Key (PIN)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setNewDeskPin(randomSixDigit())}
+                        className="inline-flex items-center gap-1 text-[11px] text-[#c8a55b] hover:underline"
+                      >
+                        <Dices className="w-3 h-3" /> Regenerate 6-Digit Key
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      minLength={6}
+                      value={newDeskPin}
+                      onChange={(e) => setNewDeskPin(e.target.value)}
+                      placeholder="6-digit key (e.g. 482915)"
+                      className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2 text-sm font-mono-num tracking-widest text-emerald-300"
+                    />
+                  </div>
+                </>
+              )}
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -709,7 +962,11 @@ export default function AdminCommandView({
                   disabled={submitting}
                   className="px-5 py-2 rounded-xl bg-[#c8a55b] text-[#090a0f] font-semibold text-xs"
                 >
-                  {submitting ? 'Issuing...' : 'Create Desk'}
+                  {submitting
+                    ? 'Issuing...'
+                    : issueMode === 'bulk'
+                      ? 'Issue All & Generate 6-Digit Keys'
+                      : 'Create Desk & Key'}
                 </button>
               </div>
             </form>
@@ -723,22 +980,32 @@ export default function AdminCommandView({
           <div className="w-full max-w-sm bg-[#101218] border border-[#c8a55b]/40 rounded-2xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-serif-display text-lg text-white">
-                Reset PIN — {resetTarget.user.traderId}
+                Reset 6-Digit Key — {resetTarget.user.traderId}
               </h3>
               <button onClick={() => setResetTarget(null)} className="text-[#8d94a5]">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleResetPin} className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-[#8d94a5]">New 6-Digit Access Key</span>
+                <button
+                  type="button"
+                  onClick={() => setNewPin(randomSixDigit())}
+                  className="inline-flex items-center gap-1 text-[11px] text-[#c8a55b] hover:underline"
+                >
+                  <Dices className="w-3 h-3" /> Generate 6-Digit
+                </button>
+              </div>
               <input
                 type="text"
                 required
-                minLength={4}
+                minLength={6}
                 autoFocus
                 value={newPin}
                 onChange={(e) => setNewPin(e.target.value)}
-                placeholder="Enter new temporary PIN"
-                className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2.5 text-xs font-mono-num text-white"
+                placeholder="e.g. 641028"
+                className="w-full bg-[#090b10] border border-[#272c3a] rounded-lg px-3 py-2.5 text-sm font-mono-num tracking-widest text-emerald-300"
               />
               <div className="flex justify-end gap-2">
                 <button
@@ -753,7 +1020,7 @@ export default function AdminCommandView({
                   disabled={submitting}
                   className="px-4 py-2 rounded-xl bg-[#c8a55b] text-[#090a0f] font-semibold text-xs"
                 >
-                  Save New PIN
+                  Save New Key
                 </button>
               </div>
             </form>

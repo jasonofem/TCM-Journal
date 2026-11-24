@@ -35,9 +35,9 @@ export async function PATCH(
       newPin?: string;
     };
 
-    if (body.newPin !== undefined && body.newPin.trim().length < 4) {
+    if (body.newPin !== undefined && body.newPin.trim().length < 6) {
       return NextResponse.json(
-        { error: 'Reset PIN must be at least 4 characters.' },
+        { error: 'Access key must be at least 6 characters (e.g. a 6-digit numeric key).' },
         { status: 400 }
       );
     }
