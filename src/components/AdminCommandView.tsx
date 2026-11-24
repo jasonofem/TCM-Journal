@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   ShieldAlert,
+  TrendingUp,
   Users,
   X,
 } from 'lucide-react';
@@ -23,6 +24,7 @@ import {
   FirmTraderSummary,
 } from '@/lib/types';
 import { formatMoney, formatR, formatRelativeTime } from '@/lib/format';
+import { FirmEquityCurveChart } from '@/components/Charts';
 
 interface AdminCommandViewProps {
   overview: FirmOverviewResponse | null;
@@ -69,6 +71,11 @@ export default function AdminCommandView({
   const [copiedCreds, setCopiedCreds] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Firm Equity Curve UI controls
+  const [curveMode, setCurveMode] = useState<'equity' | 'pnl' | 'roi'>('equity');
+  const [curveWindow, setCurveWindow] = useState<'ALL' | '30' | '90'>('ALL');
+  const [showDrawdown, setShowDrawdown] = useState(true);
 
   function randomSixDigit(): string {
     return String(Math.floor(100000 + Math.random() * 900000));
@@ -408,6 +415,167 @@ export default function AdminCommandView({
             {fm.dllBreachCount}
           </div>
           <div className="text-xs text-[#9398a6] mt-0.5">Daily Loss Rule monitor</div>
+        </div>
+      </div>
+
+      {/* Total Firm Desk Equity Curve */}
+      <div className="relative overflow-hidden rounded-2xl border border-[#c8a55b]/25 bg-gradient-to-b from-[#131620] via-[#0e1017] to-[#0a0c11] p-5 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.45)]">
+        <div
+          className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-[#c8a55b]/[0.07] blur-3xl"
+          aria-hidden="true"
+        />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#1f2432]">
+          <div>
+            <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-[#c8a55b] font-semibold">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Total Firm Desk Trajectory
+            </div>
+            <div className="flex flex-wrap items-baseline gap-3 mt-1">
+              <h3 className="font-serif-display text-xl sm:text-2xl text-white flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-[#c8a55b]" />
+                Combined Desk Equity Curve
+              </h3>
+              <span
+                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono-num font-semibold border ${
+                  fm.combinedNetPnl >= 0
+                    ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-300'
+                    : 'bg-rose-500/10 border-rose-500/35 text-rose-300'
+                }`}
+              >
+                {fm.firmRoiPct >= 0 ? '+' : ''}
+                {fm.firmRoiPct.toFixed(2)}% ROI
+              </span>
+            </div>
+            <p className="text-xs text-[#8f96a8] mt-0.5">
+              Chronological aggregate capital curve across all {overview.traders.length} desks (
+              {fm.combinedClosedTrades} closed executions) · Hover anywhere to inspect trade &amp;
+              trader attribution.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Metric Mode Pills */}
+            <div className="inline-flex rounded-xl bg-[#090b10] border border-[#222736] p-1 text-[11px]">
+              {(
+                [
+                  { id: 'equity', label: 'Equity ($)' },
+                  { id: 'pnl', label: 'Net P&L' },
+                  { id: 'roi', label: 'ROI %' },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setCurveMode(m.id)}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                    curveMode === m.id
+                      ? 'bg-[#c8a55b] text-[#090a0f] font-semibold'
+                      : 'text-[#8d94a5] hover:text-white'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Range Window Pills */}
+            <div className="inline-flex rounded-xl bg-[#090b10] border border-[#222736] p-1 text-[11px] font-mono-num">
+              {(['ALL', '90', '30'] as const).map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => setCurveWindow(w)}
+                  className={`px-2.5 py-1 rounded-lg transition-colors ${
+                    curveWindow === w
+                      ? 'bg-[#1c2130] text-[#e6c77a] font-semibold border border-[#c8a55b]/35'
+                      : 'text-[#8d94a5] hover:text-white'
+                  }`}
+                >
+                  {w === 'ALL' ? 'All' : `${w}T`}
+                </button>
+              ))}
+            </div>
+
+            {/* Underwater Drawdown Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowDrawdown((v) => !v)}
+              className={`px-3 py-1.5 rounded-xl text-[11px] font-medium border transition-colors ${
+                showDrawdown
+                  ? 'bg-rose-500/10 border-rose-500/35 text-rose-200'
+                  : 'bg-[#090b10] border-[#222736] text-[#8d94a5] hover:text-white'
+              }`}
+            >
+              {showDrawdown ? 'Drawdown On' : 'Drawdown Off'}
+            </button>
+          </div>
+        </div>
+
+        {/* Summary Stat Strip */}
+        <div className="relative z-10 grid grid-cols-2 sm:grid-cols-5 gap-3 py-4">
+          <div className="rounded-xl bg-[#090b10]/85 border border-[#1f2432] px-3.5 py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-[#7e8597]">
+              Starting Capital
+            </div>
+            <div className="font-mono-num text-sm font-semibold text-[#d9d4c8] mt-0.5">
+              {formatMoney(fm.totalInitialCapital)}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-[#090b10]/85 border border-[#c8a55b]/30 px-3.5 py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-[#c8a55b]">
+              Live Firm Equity
+            </div>
+            <div className="font-mono-num text-sm font-semibold text-white mt-0.5">
+              {formatMoney(fm.totalCurrentEquity)}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-[#090b10]/85 border border-[#1f2432] px-3.5 py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-[#7e8597]">
+              High-Water Mark
+            </div>
+            <div className="font-mono-num text-sm font-semibold text-emerald-300 mt-0.5">
+              {formatMoney(fm.firmPeakEquity)}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-[#090b10]/85 border border-[#1f2432] px-3.5 py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-[#7e8597]">
+              Max Firm Drawdown
+            </div>
+            <div className="font-mono-num text-sm font-semibold text-rose-300 mt-0.5">
+              {formatMoney(fm.firmMaxDrawdown)}{' '}
+              <span className="text-[11px] text-[#9ca3b5]">
+                ({fm.firmMaxDrawdownPct.toFixed(2)}%)
+              </span>
+            </div>
+          </div>
+
+          <div className="col-span-2 sm:col-span-1 rounded-xl bg-[#090b10]/85 border border-[#1f2432] px-3.5 py-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-[#7e8597]">
+              Firm Profit Factor
+            </div>
+            <div className="font-mono-num text-sm font-semibold text-[#e6c77a] mt-0.5">
+              {fm.firmProfitFactor !== null
+                ? fm.firmProfitFactor.toFixed(2)
+                : fm.combinedNetPnl > 0
+                  ? '∞'
+                  : '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* Interactive Smooth Equity & Drawdown SVG */}
+        <div className="relative z-10 pt-1">
+          <FirmEquityCurveChart
+            points={overview.firmEquityCurve}
+            initialCapital={fm.totalInitialCapital}
+            mode={curveMode}
+            showDrawdown={showDrawdown}
+            windowLimit={curveWindow}
+          />
         </div>
       </div>
 

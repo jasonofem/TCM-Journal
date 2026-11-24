@@ -5,7 +5,7 @@ import {
   listRecentFirmBatches,
   listUsers,
 } from '@/lib/db';
-import { computeJournalMetrics } from '@/lib/trading-math';
+import { buildFirmEquityCurve, computeJournalMetrics } from '@/lib/trading-math';
 import {
   ComputedTrade,
   FirmOverviewResponse,
@@ -135,6 +135,8 @@ export async function GET() {
 
     allComputedWithMeta.sort((a, b) => b.entryDatetime.localeCompare(a.entryDatetime));
 
+    const firmCurve = buildFirmEquityCurve(allComputedWithMeta, totalInitialCapital);
+
     const decided = totalFirmWins + totalFirmLosses;
     const firmWinRate = decided > 0 ? (totalFirmWins / decided) * 100 : null;
     const firmProfitFactor =
@@ -151,6 +153,10 @@ export async function GET() {
         totalInitialCapital,
         totalCurrentEquity,
         combinedNetPnl,
+        firmRoiPct: firmCurve.roiPct,
+        firmPeakEquity: firmCurve.peakEquity,
+        firmMaxDrawdown: firmCurve.maxDrawdown,
+        firmMaxDrawdownPct: firmCurve.maxDrawdownPct,
         combinedClosedTrades,
         combinedOpenTrades,
         firmWinRate,
@@ -158,6 +164,7 @@ export async function GET() {
         dllBreachCount,
         tradesToday,
       },
+      firmEquityCurve: firmCurve.points,
       traders,
       recentFirmTrades: allComputedWithMeta.slice(0, 100),
       recentBatches: recentBatches.map((b) => {

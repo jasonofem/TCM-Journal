@@ -4,6 +4,7 @@ import {
   DashboardFilters,
   DashboardMetrics,
   EquityPoint,
+  FirmEquityPoint,
   PositionSide,
   QualityFlag,
   TradeOutcome,
@@ -762,4 +763,66 @@ export function computeJournalMetrics(
     timezoneOffsetHours: opts.timezoneOffsetHours ?? 1,
   });
   return { computedTrades, metrics, insightSummary: metrics.insightSummary };
+}
+
+export function buildFirmEquityCurve(
+  firmTrades: Array<ComputedTrade & { traderIdCode: string; traderName: string }>,
+  totalInitialCapital: number
+): {
+  points: FirmEquityPoint[];
+  peakEquity: number;
+  maxDrawdown: number;
+  maxDrawdownPct: number;
+  roiPct: number;
+} {
+  const closedSorted = firmTrades
+    .filter((t) => t.outcome !== 'Open' && t.netPnl !== null)
+    .sort((a, b) => {
+      const aDt = a.exitDatetime || a.entryDatetime || '';
+      const bDt = b.exitDatetime || b.entryDatetime || '';
+      const dtCmp = aDt.localeCompare(bDt);
+      if (dtCmp !== 0) return dtCmp;
+      const entryCmp = (a.entryDatetime || '').localeCompare(b.entryDatetime || '');
+      if (entryCmp !== 0) return entryCmp;
+      const traderCmp = a.traderIdCode.localeCompare(b.traderIdCode);
+      if (traderCmp !== 0) return traderCmp;
+      return a.sn - b.sn;
+    });
+
+  let cumPnl = 0;
+  let equity = totalInitialCapital;
+  let peakEquity = totalInitialCapital;
+  let maxDrawdown = 0;
+  let maxDrawdownPct = 0;
+
+  const points: FirmEquityPoint[] = [];
+  closedSorted.forEach((t, idx) => {
+    const net = t.netPnl || 0;
+    cumPnl += net;
+    equity = totalInitialCapital + cumPnl;
+    if (equity > peakEquity) peakEquity = equity;
+    const drawdown = equity - peakEquity; // <= 0
+    const drawdownPct = peakEquity > 0 ? (Math.abs(drawdown) / peakEquity) * 100 : 0;
+    if (drawdown < maxDrawdown) maxDrawdown = drawdown;
+    if (drawdownPct > maxDrawdownPct) maxDrawdownPct = drawdownPct;
+
+    points.push({
+      index: idx + 1,
+      label: `#${idx + 1}`,
+      date: t.exitDate || t.entryDate,
+      datetime: t.exitDatetime || t.entryDatetime,
+      traderIdCode: t.traderIdCode,
+      traderName: t.traderName,
+      pair: t.pair,
+      netPnl: net,
+      cumPnl,
+      equity,
+      peakEquity,
+      drawdown,
+      drawdownPct,
+    });
+  });
+
+  const roiPct = totalInitialCapital > 0 ? (cumPnl / totalInitialCapital) * 100 : 0;
+  return { points, peakEquity, maxDrawdown, maxDrawdownPct, roiPct };
 }

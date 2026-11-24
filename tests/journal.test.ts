@@ -8,7 +8,7 @@ import {
   parsePastedOrTextReport,
   parseSpreadsheetBuffer,
 } from '@/lib/import-parser';
-import { computeJournalMetrics } from '@/lib/trading-math';
+import { buildFirmEquityCurve, computeJournalMetrics } from '@/lib/trading-math';
 import { TradeRecord } from '@/lib/types';
 
 function makeExistingTrade(overrides: Partial<TradeRecord> = {}): TradeRecord {
@@ -387,6 +387,84 @@ describe('Trading Math, QC Flags & PIN Security', () => {
     } finally {
       await deleteUserRecord(user.id);
     }
+  });
+
+  it('builds chronological multi-desk firm equity curve, high-water mark, and drawdown', () => {
+    const traderATrades = [
+      makeExistingTrade({
+        id: 'fa-1',
+        sn: 1,
+        pair: 'EURUSD',
+        entryDatetime: '2026-11-18 08:00:00',
+        exitDate: '2026-11-18',
+        exitDatetime: '2026-11-18 10:00:00',
+        brokerPnl: 400,
+        commission: 0,
+        swap: 0,
+      }),
+      makeExistingTrade({
+        id: 'fa-2',
+        sn: 2,
+        pair: 'GBPUSD',
+        entryDatetime: '2026-11-20 08:00:00',
+        exitDate: '2026-11-20',
+        exitDatetime: '2026-11-20 12:00:00',
+        brokerPnl: -250,
+        commission: 0,
+        swap: 0,
+      }),
+    ];
+
+    const traderBTrades = [
+      makeExistingTrade({
+        id: 'fb-1',
+        userId: 'u-2',
+        sn: 1,
+        pair: 'XAUUSD',
+        entryDatetime: '2026-11-19 09:00:00',
+        exitDate: '2026-11-19',
+        exitDatetime: '2026-11-19 14:00:00',
+        brokerPnl: 600,
+        commission: 0,
+        swap: 0,
+      }),
+      makeExistingTrade({
+        id: 'fb-open',
+        userId: 'u-2',
+        sn: 2,
+        pair: 'USDJPY',
+        exitPrice: null,
+        exitDate: null,
+        exitTime: null,
+        exitDatetime: null,
+        brokerPnl: null,
+      }),
+    ];
+
+    const compA = computeJournalMetrics(traderATrades, {
+      initialCapital: 5000,
+      defaultRiskPct: 1,
+      breakevenThreshold: 1,
+      dailyLossLimitPct: 5,
+    }).computedTrades.map((t) => ({ ...t, traderIdCode: 'TCM-T-001', traderName: 'Trader One' }));
+
+    const compB = computeJournalMetrics(traderBTrades, {
+      initialCapital: 5000,
+      defaultRiskPct: 1,
+      breakevenThreshold: 1,
+      dailyLossLimitPct: 5,
+    }).computedTrades.map((t) => ({ ...t, traderIdCode: 'TCM-T-003', traderName: 'Jason Ofem' }));
+
+    const firm = buildFirmEquityCurve([...compA, ...compB], 10000);
+    expect(firm.points).toHaveLength(3); // excludes open trade
+    expect(firm.points.map((p) => p.traderIdCode)).toEqual(['TCM-T-001', 'TCM-T-003', 'TCM-T-001']);
+    expect(firm.points[0].equity).toBe(10400);
+    expect(firm.points[1].equity).toBe(11000);
+    expect(firm.points[2].equity).toBe(10750);
+    expect(firm.peakEquity).toBe(11000);
+    expect(firm.maxDrawdown).toBe(-250);
+    expect(firm.maxDrawdownPct).toBeCloseTo((250 / 11000) * 100, 3);
+    expect(firm.roiPct).toBeCloseTo(7.5, 3);
   });
 
   it('hashes and verifies PINs securely', () => {
