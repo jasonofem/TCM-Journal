@@ -9,6 +9,10 @@ import {
   parseSpreadsheetBuffer,
 } from '@/lib/import-parser';
 import { buildFirmEquityCurve, computeJournalMetrics } from '@/lib/trading-math';
+import {
+  generateMt5EaCode,
+  generateMt5PythonScript,
+} from '@/lib/mt5-sync-scripts';
 import { TradeRecord } from '@/lib/types';
 
 function makeExistingTrade(overrides: Partial<TradeRecord> = {}): TradeRecord {
@@ -465,6 +469,49 @@ describe('Trading Math, QC Flags & PIN Security', () => {
     expect(firm.maxDrawdown).toBe(-250);
     expect(firm.maxDrawdownPct).toBeCloseTo((250 / 11000) * 100, 3);
     expect(firm.roiPct).toBeCloseTo(7.5, 3);
+  });
+
+  it('generates configured MT5 EA & Python auto-sync scripts and preserves JSON exitReason', () => {
+    const cfg = {
+      webhookUrl: 'https://tcmjournaldesk.vercel.app/api/ingest/webhook',
+      apiToken: 'tcm_test_token_123',
+      traderId: 'TCM-T-003',
+    };
+    const mq5 = generateMt5EaCode(cfg);
+    const py = generateMt5PythonScript(cfg);
+    expect(mq5).toContain(cfg.webhookUrl);
+    expect(mq5).toContain(cfg.apiToken);
+    expect(mq5).toContain('https://tcmjournaldesk.vercel.app');
+    expect(mq5).toContain('OnTradeTransaction');
+    expect(py).toContain(cfg.webhookUrl);
+    expect(py).toContain(cfg.apiToken);
+    expect(py).toContain('MetaTrader5');
+
+    const parsed = parsePastedOrTextReport(
+      JSON.stringify([
+        {
+          brokerTicket: '55112233',
+          pair: 'XAUUSD',
+          position: 'Buy',
+          lots: 0.25,
+          entryDatetime: '2026-11-24 10:00:00',
+          entryPrice: 2650,
+          stopLoss: 2640,
+          takeProfit: 2675,
+          exitDatetime: '2026-11-24 12:00:00',
+          exitPrice: 2675,
+          commission: -1.5,
+          swap: 0,
+          brokerPnl: 625,
+          exitReason: 'Take profit hit',
+        },
+      ]),
+      'MT5_EA_LiveSync',
+      1
+    );
+    expect(parsed.trades).toHaveLength(1);
+    expect(parsed.trades[0].exitReason).toBe('Take profit hit');
+    expect(parsed.trades[0].brokerTicket).toBe('55112233');
   });
 
   it('hashes and verifies PINs securely', () => {

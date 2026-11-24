@@ -62,21 +62,35 @@ export async function POST(req: NextRequest) {
 
     const parsed = parsePastedOrTextReport(reportText, fileName, user.timezoneOffsetHours);
     const existing = await listTradesByUser(user.id);
+    const existingById = new Map(existing.map((t) => [t.id, t]));
     const rows = classifyImportedTrades(parsed.trades, existing, {
       setup: 'H1 5050 Bounce',
       timeframe: null,
     });
 
-    const batch = await createImportBatchRecord({
-      userId: user.id,
-      fileName,
-      sourceType: 'webhook',
-      totalParsed: rows.length,
-      insertedCount: 0,
-      updatedCount: 0,
-      skippedCount: 0,
-      reportTimezoneOffset: user.timezoneOffsetHours,
+    const hasOpenUpdates = rows.some((r) => {
+      if (r.action !== 'SKIP_DUPLICATE' || !r.matchedTradeId || !r.candidate.isOpen) return false;
+      const prev = existingById.get(r.matchedTradeId);
+      if (!prev || prev.exitPrice !== null) return false;
+      const slChanged = r.candidate.stopLoss !== null && r.candidate.stopLoss !== prev.stopLoss;
+      const tpChanged = r.candidate.takeProfit !== null && r.candidate.takeProfit !== prev.takeProfit;
+      return slChanged || tpChanged;
     });
+
+    const hasChanges =
+      hasOpenUpdates || rows.some((r) => r.action === 'NEW' || r.action === 'UPDATE_CLOSE');
+    const batch = hasChanges
+      ? await createImportBatchRecord({
+          userId: user.id,
+          fileName,
+          sourceType: 'webhook',
+          totalParsed: rows.length,
+          insertedCount: 0,
+          updatedCount: 0,
+          skippedCount: 0,
+          reportTimezoneOffset: user.timezoneOffsetHours,
+        })
+      : null;
 
     let insertedCount = 0;
     let updatedCount = 0;
@@ -110,13 +124,15 @@ export async function POST(req: NextRequest) {
             notes: c.notes,
             source: 'webhook',
           },
-          { importBatchId: batch.id, timezoneOffsetHours: user.timezoneOffsetHours }
+          { importBatchId: batch?.id ?? null, timezoneOffsetHours: user.timezoneOffsetHours }
         );
         insertedCount++;
       } else if (row.action === 'UPDATE_CLOSE' && row.matchedTradeId) {
         await updateTradeRecord(
           row.matchedTradeId,
           {
+            stopLoss: c.stopLoss ?? undefined,
+            takeProfit: c.takeProfit ?? undefined,
             exitPrice: c.exitPrice,
             exitDate: c.exitDate,
             exitTime: c.exitTime,
@@ -124,20 +140,40 @@ export async function POST(req: NextRequest) {
             commission: c.commission,
             swap: c.swap,
             brokerPnl: c.brokerPnl,
-            importBatchId: batch.id,
+            importBatchId: batch?.id ?? null,
           },
           user.timezoneOffsetHours
         );
         updatedCount++;
+      } else if (row.action === 'SKIP_DUPLICATE' && row.matchedTradeId && c.isOpen) {
+        const prev = existingById.get(row.matchedTradeId);
+        const slChanged = prev && prev.exitPrice === null && c.stopLoss !== null && c.stopLoss !== prev.stopLoss;
+        const tpChanged = prev && prev.exitPrice === null && c.takeProfit !== null && c.takeProfit !== prev.takeProfit;
+        if (slChanged || tpChanged) {
+          await updateTradeRecord(
+            row.matchedTradeId,
+            {
+              stopLoss: c.stopLoss ?? undefined,
+              takeProfit: c.takeProfit ?? undefined,
+              importBatchId: batch?.id ?? null,
+            },
+            user.timezoneOffsetHours
+          );
+          updatedCount++;
+        } else {
+          skippedCount++;
+        }
       } else {
         skippedCount++;
       }
     }
 
-    await dbQuery(
-      `UPDATE import_batches SET inserted_count = $1, updated_count = $2, skipped_count = $3 WHERE id = $4`,
-      [insertedCount, updatedCount, skippedCount, batch.id]
-    );
+    if (batch) {
+      await dbQuery(
+        `UPDATE import_batches SET inserted_count = $1, updated_count = $2, skipped_count = $3 WHERE id = $4`,
+        [insertedCount, updatedCount, skippedCount, batch.id]
+      );
+    }
 
     return NextResponse.json({
       ok: true,
