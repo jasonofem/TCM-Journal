@@ -1148,6 +1148,7 @@ export function parsePastedOrTextReport(
               session: item.session ? normalizeSession(String(item.session), entryDt.time, timezoneOffsetHours) : null,
               notes: item.notes ? String(item.notes) : null,
               mistakes: item.mistakes ? String(item.mistakes) : null,
+              exitReason: item.exitReason ? String(item.exitReason) : null,
               isOpen: exitPrice === null || !exitDt,
             },
             timezoneOffsetHours

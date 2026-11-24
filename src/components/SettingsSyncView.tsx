@@ -2,8 +2,10 @@
 
 import React, { useState } from 'react';
 import {
+  Activity,
   Check,
   Copy,
+  Download,
   KeyRound,
   RefreshCw,
   Save,
@@ -14,6 +16,10 @@ import {
   Webhook,
 } from 'lucide-react';
 import { UserProfile } from '@/lib/types';
+import {
+  generateMt5EaCode,
+  generateMt5PythonScript,
+} from '@/lib/mt5-sync-scripts';
 
 interface SettingsSyncViewProps {
   currentUser: UserProfile;
@@ -181,9 +187,45 @@ export default function SettingsSyncView({
         body: JSON.stringify({ regenerateToken: true }),
       });
       if (res.ok) {
-        setStatusMsg('Rotated API Sync Token.');
+        setStatusMsg('Rotated API Sync Token. Re-download your MT5 EA or Python script with the new token.');
         await onUpdated();
       }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function downloadTextFile(filename: string, content: string) {
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function testWebhookPing() {
+    setStatusMsg(null);
+    setErrMsg(null);
+    setBusy(true);
+    try {
+      const res = await fetch('/api/ingest/webhook', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tcm-token': targetUser.apiToken,
+        },
+        body: JSON.stringify({ fileName: 'mt5-ping-test', trades: [] }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrMsg(data.error || 'Webhook ping failed.');
+        return;
+      }
+      setStatusMsg(`Live MT5 Webhook verified for ${data.traderId} — ready for zero-export sync!`);
     } finally {
       setBusy(false);
     }
@@ -343,27 +385,38 @@ export default function SettingsSyncView({
 
         {/* Webhook Sync + Security */}
         <div className="space-y-6">
-          <div className="bg-[#101218] border border-[#222634] rounded-2xl p-6 space-y-3">
-            <div className="flex items-center justify-between border-b border-[#1e222f] pb-3">
+          <div className="bg-[#101218] border border-[#222634] rounded-2xl p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1e222f] pb-3">
               <div className="flex items-center gap-2">
                 <Webhook className="w-4 h-4 text-[#c8a55b]" />
                 <h3 className="text-sm font-semibold text-white">
-                  Hands-Free EA / Webhook Sync
+                  Zero-Export MT5 Live Auto-Sync
                 </h3>
               </div>
-              {isSelf && (
+              <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={regenerateWebhookToken}
-                  className="text-[11px] text-[#c8a55b] hover:underline flex items-center gap-1"
+                  disabled={busy}
+                  onClick={testWebhookPing}
+                  className="text-[11px] text-emerald-300 hover:underline flex items-center gap-1"
                 >
-                  <RefreshCw className="w-3 h-3" /> Rotate Token
+                  <Activity className="w-3 h-3" /> Test Ping
                 </button>
-              )}
+                {isSelf && (
+                  <button
+                    type="button"
+                    onClick={regenerateWebhookToken}
+                    className="text-[11px] text-[#c8a55b] hover:underline flex items-center gap-1"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Rotate Token
+                  </button>
+                )}
+              </div>
             </div>
             <p className="text-xs text-[#8d94a5]">
-              Push MT4/MT5 HTML, CSV, or JSON directly from an EA, Python script, or Zapier/Make
-              automation. Duplicates are automatically ignored.
+              Attach once to MetaTrader 5 so every open position, SL/TP edit, and closed trade syncs
+              automatically with zero manual exporting. Your personal token is pre-filled inside both
+              downloads below.
             </p>
             <div className="bg-[#090b10] border border-[#262b38] rounded-xl p-3 font-mono-num text-[11px] text-[#d9d4c8] space-y-1.5">
               <div>
@@ -387,6 +440,84 @@ export default function SettingsSyncView({
                   {copiedToken ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                   {copiedToken ? 'Copied' : 'Copy'}
                 </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="rounded-xl bg-[#090b10] border border-[#c8a55b]/30 p-3.5 flex flex-col justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-[#e6c77a]">
+                    Option A — MT5 Expert Advisor
+                  </div>
+                  <p className="text-[11px] text-[#8d94a5] mt-1 leading-relaxed">
+                    Runs directly inside MetaTrader 5 (Windows, Mac, or VPS). Drop on 1 chart to
+                    sync your whole account automatically.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadTextFile(
+                      'TCM_LiveSync.mq5',
+                      generateMt5EaCode({
+                        webhookUrl,
+                        apiToken: targetUser.apiToken,
+                        traderId: targetUser.traderId,
+                      })
+                    )
+                  }
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#c8a55b] hover:bg-[#d8b76e] text-[#090a0f] font-semibold text-xs"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download TCM_LiveSync.mq5
+                </button>
+              </div>
+
+              <div className="rounded-xl bg-[#090b10] border border-[#262b38] p-3.5 flex flex-col justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-white">
+                    Option B — Windows Python Watcher
+                  </div>
+                  <p className="text-[11px] text-[#8d94a5] mt-1 leading-relaxed">
+                    No MetaEditor or MT5 settings needed. Polls your open MT5 terminal every 15s via
+                    the official MetaTrader5 package.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadTextFile(
+                      'tcm_mt5_autosync.py',
+                      generateMt5PythonScript({
+                        webhookUrl,
+                        apiToken: targetUser.apiToken,
+                        traderId: targetUser.traderId,
+                      })
+                    )
+                  }
+                  className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#161a24] border border-[#2c3140] hover:border-[#c8a55b]/50 text-white font-semibold text-xs"
+                >
+                  <Download className="w-3.5 h-3.5 text-[#c8a55b]" />
+                  Download tcm_mt5_autosync.py
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-[#0b0d13] border border-[#1d212d] px-3.5 py-2.5 text-[11px] text-[#9398a6] space-y-1">
+              <div className="font-semibold text-[#d6d2c7]">Quick Setup (MT5 Expert Advisor):</div>
+              <div>
+                1. In MT5 open <span className="text-white">Tools → Options → Expert Advisors</span>,
+                enable <span className="text-white">Allow WebRequest for listed URL</span>, and add{' '}
+                <span className="font-mono-num text-[#c8a55b]">
+                  {typeof window !== 'undefined' ? window.location.origin : 'https://tcmjournaldesk.vercel.app'}
+                </span>
+              </div>
+              <div>
+                2. Press <span className="text-white">F4</span> (MetaEditor) →{' '}
+                <span className="text-white">File → Open Data Folder → MQL5/Experts/</span>, save{' '}
+                <span className="font-mono-num text-white">TCM_LiveSync.mq5</span>, press{' '}
+                <span className="text-white">F7</span> to compile, then drag onto any chart with{' '}
+                <span className="text-emerald-300">Algo Trading</span> on.
               </div>
             </div>
           </div>
