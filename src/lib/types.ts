@@ -257,6 +257,22 @@ export interface EquityPoint {
   drawdown: number;
 }
 
+export interface FirmEquityPoint {
+  index: number;
+  label: string;
+  date: string;
+  datetime: string;
+  traderIdCode: string;
+  traderName: string;
+  pair: string;
+  netPnl: number;
+  cumPnl: number;
+  equity: number;
+  peakEquity: number;
+  drawdown: number;
+  drawdownPct: number;
+}
+
 export interface DashboardMetrics {
   closedCount: number;
   openCount: number;
@@ -331,6 +347,10 @@ export interface FirmOverviewResponse {
     totalInitialCapital: number;
     totalCurrentEquity: number;
     combinedNetPnl: number;
+    firmRoiPct: number;
+    firmPeakEquity: number;
+    firmMaxDrawdown: number;
+    firmMaxDrawdownPct: number;
     combinedClosedTrades: number;
     combinedOpenTrades: number;
     firmWinRate: number | null;
@@ -338,6 +358,7 @@ export interface FirmOverviewResponse {
     dllBreachCount: number;
     tradesToday: number;
   };
+  firmEquityCurve: FirmEquityPoint[];
   traders: FirmTraderSummary[];
   recentFirmTrades: Array<ComputedTrade & { traderIdCode: string; traderName: string }>;
   recentBatches: Array<ImportBatchRecord & { traderIdCode: string; traderName: string }>;
